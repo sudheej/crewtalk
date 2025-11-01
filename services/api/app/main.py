@@ -1,12 +1,12 @@
-import os, json
+import os
 from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .db import init_db
 from .agents import make_moderator, make_participant, make_notetaker, simple_task
-from .llm import get_llm
 import httpx
+from crewai import Crew
 
 app = FastAPI(title="Crew Talk API")
 
@@ -77,8 +77,9 @@ async def add_agent(sid: str, body: AgentIn):
     SESSIONS[sid]["agents"][body.name] = {"spec": body.model_dump()}
     # sanity: try a very short run to validate model connectivity
     t = simple_task(agent, "Reply 'ready' if you can hear me.")
+    probe_crew = Crew(agents=[agent], tasks=[t])
     try:
-        out = t.execute()
+        out = probe_crew.kickoff()
     except Exception as exc:
         detail = str(exc) or repr(exc)
         raise HTTPException(status_code=502, detail=f"Agent probe failed: {detail}")

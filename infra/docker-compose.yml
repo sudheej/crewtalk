@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: crewtalk
+    ports: ["5432:5432"]
+    volumes:
+      - ../volumes/pg:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ../volumes/ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  api:
+    build: ../services/api
+    env_file:
+      - ../.env.example
+    depends_on: [db, redis, ollama]
+    ports: ["8080:8080"]
+
+  web:
+    build: ../apps/web
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    depends_on: [api]
+    ports: ["3000:3000"]

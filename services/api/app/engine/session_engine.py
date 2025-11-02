@@ -178,10 +178,18 @@ class SessionEngine:
     # --- Internal orchestration -----------------------------------------
 
     def _configure_agents(self, agents: List[Dict[str, Any]]) -> None:
-        self._agents = agents
-        self._moderator = next((a for a in agents if a["role"] == "moderator"), None)
-        self._note_taker = next((a for a in agents if a["role"] == "notetaker"), None)
-        self._participants = [a for a in agents if a["role"] == "participant"]
+        normalized: List[Dict[str, Any]] = []
+        for agent in agents:
+            entry = dict(agent)
+            if entry.get("id") is not None:
+                entry["id"] = str(entry["id"])
+            if entry.get("session_id") is not None:
+                entry["session_id"] = str(entry["session_id"])
+            normalized.append(entry)
+        self._agents = normalized
+        self._moderator = next((a for a in normalized if a["role"] == "moderator"), None)
+        self._note_taker = next((a for a in normalized if a["role"] == "notetaker"), None)
+        self._participants = [a for a in normalized if a["role"] == "participant"]
 
     async def _run(self, meta: Dict[str, Any]) -> None:
         try:

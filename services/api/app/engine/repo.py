@@ -159,7 +159,7 @@ async def save_message(
     agent_id: Optional[str],
     phase: str,
     turn_index: int,
-    text: str,
+    message_text: str,
     sentiment: Optional[float],
     confidence: Optional[float],
 ) -> int:
@@ -178,7 +178,7 @@ async def save_message(
                     "agent_id": agent_id,
                     "phase": phase,
                     "turn_index": turn_index,
-                    "text": text,
+                    "text": message_text,
                     "sentiment": sentiment,
                     "confidence": confidence,
                 },

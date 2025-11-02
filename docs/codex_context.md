@@ -7,9 +7,9 @@
 - **Models**: Ollama-served Gemma (`gemma3:4b-it-qat` by default, configurable via `LLM_MODEL_ID`).
 
 ## LLM Integration
-- `services/api/app/llm.py`: `get_llm()` returns the provider string `ollama/<model>` and force-syncs Ollama-related env vars (`LITELLM_OLLAMA_API_BASE`, `OLLAMA_BASE_URL`, `OLLAMA_HOST`, `OLLAMA_URL`, `OLLAMA_API_BASE`) to `http://ollama:11434`. CrewAI then instantiates its own wrapper without double-wrapping.
-- **Critical**: Inside the API container the Ollama endpoint is *not* `localhost`. If LiteLLM logs still show `localhost:11434`, re-check these env vars or restart the container.
-- The Ollama service pulls `${LLM_MODEL_ID}` automatically during startup.  
+- `services/api/app/llm.py`: `get_llm()` returns the provider string `ollama/<model>` and force-syncs Ollama-related env vars (`LITELLM_OLLAMA_API_BASE`, `OLLAMA_BASE_URL`, `OLLAMA_HOST`, `OLLAMA_URL`, `OLLAMA_API_BASE`) to the URL in `.env` (default `http://ollama:11434`). CrewAI then instantiates its own wrapper without double-wrapping.
+- **Critical**: Inside the API container the Ollama endpoint is *not* `localhost`. If LiteLLM logs still show `localhost:11434`, re-check these env vars or restart the container. If you are running Ollama on the host, set `OLLAMA_URL=http://host.docker.internal:11434`.
+- The Ollama container now pulls `${LLM_MODEL_ID}` automatically during startup.  
   Run `docker compose -f infra/docker-compose.yml exec -T ollama ollama pull <other-model>` only when switching to a different tag.
 
 ## Agent Templates
@@ -18,9 +18,17 @@
   - `simple_task()` must include `expected_output` or CrewAI raises validation errors.
 
 ## Session Flow
-- `POST /sessions` seeds in-memory metadata (`SESSIONS` dict).
-- `POST /sessions/{sid}/agents` builds the requested agent, stores its spec, and runs a 1-turn probe (`Crew(...).kickoff()`) expecting the agent to return `ready`. Any failure bubbles up as `HTTP 502 Agent probe failed: …`.
-- `GET /health/ollama` proxies a `/api/tags` call to confirm the API container can reach Ollama.
+- Metadata lives in Postgres (`sessions`, `agents`, `messages`, `notepad_snapshots`). Short-term context (per-agent scratch + notepad) resides in Redis.
+- `POST /sessions` inserts a new session row (`status=idle`, `phase=discover`).
+- `POST /sessions/{sid}/agents` runs a one-turn “ready” probe and persists the agent.
+- `POST /sessions/{sid}/start` spins up a `SessionEngine` (one per session) that:
+  - orchestrates Double Diamond phases with deterministic Moderator → Participants → NoteTaker turns,
+  - streams LiteLLM deltas (`token.delta`) to `/sessions/{sid}/stream`,
+  - commits telemetry-enhanced `message.created` entries to Postgres,
+  - maintains short-term memory (last 8 turns per agent) in Redis, and
+  - handles pause/resume/advance/stop controls.
+- `GET /sessions/{sid}` hydrates the UI (agents, last 50 messages, notepad).
+- `GET /sessions/{sid}/export` returns full session/agent/message/notepad history.
 
 ## Known Issues & Fixes
 1. **LiteLLM “LLM object has no attribute split”**  
@@ -42,8 +50,9 @@
 ## Bring-Up Checklist
 1. `cd infra && docker compose up --build`
 2. Confirm `curl http://localhost:8080/health/ollama` returns `{"ok": true, …}`
-3. Optional: pull alternate models with `docker compose exec -T ollama ollama pull <model>`
-4. Optional: `./scripts/debug_agent_probe.sh` to validate the probe task.
+3. Add moderator + participants via UI (each runs the readiness probe).
+4. Start the session; watch `/sessions/{sid}/stream` (UI handles WebSocket subscriptions).
+5. Optional: pull alternate models with `docker compose exec -T ollama ollama pull <model>`
 
 ## References
 - Root `README.md` for prerequisites, initial workflow, and configuration knobs.

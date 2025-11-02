@@ -32,6 +32,8 @@ services:
       - ../.env.example
     depends_on: [db, redis, ollama]
     ports: ["8080:8080"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   web:
     build: ../apps/web

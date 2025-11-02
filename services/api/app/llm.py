@@ -1,6 +1,6 @@
 import os
 
-# Default to the docker service; override via OLLAMA_URL env if needed
+# Default to the bundled docker service; override via OLLAMA_URL env if needed
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 DEFAULT_MODEL = os.getenv("LLM_MODEL_ID", "gemma3:4b-it-qat")
 

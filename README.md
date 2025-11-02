@@ -1,4 +1,4 @@
-# CrewTalk Bootstrap (FastAPI + CrewAI + Next.js)
+# CrewTalk 
 
 CrewTalk is a collaborative workshop simulator that uses CrewAI agents to run time-boxed ideation sessions. The stack bundles a FastAPI backend, a Next.js control room UI, and an Ollama-hosted Gemma model so you can experiment with multi-agent facilitation, sentiment tracking, and Double Diamond workflows end-to-end.
 

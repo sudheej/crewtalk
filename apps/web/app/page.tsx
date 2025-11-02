@@ -66,6 +66,7 @@ type MessageTurn = {
 type SessionDetail = {
   id: string;
   title: string;
+  problem_statement: string;
   phase: string;
   status: string;
   deadline: string | null;
@@ -194,6 +195,23 @@ export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [wsStatus, setWsStatus] = useState<"idle" | "connecting" | "open" | "closed">("idle");
 
+  const normalizeTurns = useCallback((turns: MessageTurn[]) => {
+    const map = new Map<number, MessageTurn>();
+    turns.forEach((entry) => {
+      map.set(entry.id, entry);
+    });
+    return Array.from(map.values())
+      .sort((a, b) => {
+        if (b.turn_index !== a.turn_index) {
+          return b.turn_index - a.turn_index;
+        }
+        const aTime = new Date(a.created_at).getTime();
+        const bTime = new Date(b.created_at).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 100);
+  }, []);
+
   const wsRef = useRef<WebSocket | null>(null);
 
   const timeFormatter = useMemo(
@@ -261,7 +279,7 @@ export default function Home() {
             delete next[agentId];
             return next;
           });
-          setTimeline((prev) => [...prev, turn].slice(-100));
+          setTimeline((prev) => normalizeTurns([...prev, turn]));
           setSession((prev) =>
             prev
               ? {
@@ -318,7 +336,7 @@ export default function Home() {
           break;
       }
     },
-    [appendLog, session?.phase],
+    [appendLog, normalizeTurns, session?.phase],
   );
 
   const openStream = useCallback(
@@ -382,10 +400,10 @@ export default function Home() {
       }
       const data = (await response.json()) as SessionDetail;
       setSession(data);
-      setTimeline(data.turns || []);
+      setTimeline(normalizeTurns(data.turns || []));
       setNotepad(data.notepad ?? "");
     },
-    [],
+    [normalizeTurns],
   );
 
   const handleSessionSubmit = useCallback(
@@ -842,7 +860,7 @@ export default function Home() {
                   <code>
                     {session.title} · {session.phase} phase · {session.strategy}
                   </code>
-                  <span>{sessionForm.problem_statement}</span>
+                  <span>{session.problem_statement}</span>
                 </>
               ) : (
                 <span>No session selected. Create one before probing agents.</span>
@@ -960,6 +978,12 @@ export default function Home() {
               {session?.status.toUpperCase() ?? "IDLE"}
             </code>
             <span>Streaming: {wsStatus.toUpperCase()}</span>
+            {session ? (
+              <>
+                <span>Current problem statement</span>
+                <code className="whitespace-pre-wrap">{session.problem_statement}</code>
+              </>
+            ) : null}
           </div>
         </RetroPanel>
       </div>
@@ -1010,7 +1034,7 @@ export default function Home() {
             </span>
           }
         >
-          <div className="pixel-log">
+          <div className="pixel-log pixel-log--scroll">
             {Object.entries(drafts).map(([agentId, text]) => {
               const agent = agentLookup.get(agentId);
               return (

@@ -246,6 +246,7 @@ async def get_session_detail(sid: str):
     return {
         "id": session_row["id"],
         "title": session_row["title"],
+        "problem_statement": session_row["problem_statement"],
         "phase": session_row["phase"],
         "status": session_row["status"],
         "deadline": session_row.get("deadline"),

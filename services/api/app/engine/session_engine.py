@@ -86,6 +86,7 @@ class SessionEngine:
         self._stop_requested = False
         self._advance_requested = False
         self._lock = asyncio.Lock()
+        self._session_meta: Dict[str, Any] = {}
 
     # --- Public controls -------------------------------------------------
 
@@ -97,6 +98,7 @@ class SessionEngine:
             meta = await repo.get_session(self.sid)
             if not meta:
                 raise ValueError(f"Session {self.sid} not found")
+            self._session_meta = dict(meta)
             agents = await repo.list_agents(self.sid)
             self._configure_agents(agents)
             if not self._moderator or not self._participants:
@@ -117,6 +119,7 @@ class SessionEngine:
                 phase=self.phase,
                 turn_index=self.turn_index,
             )
+            self._update_session_meta(status="running", phase=self.phase, turn_index=self.turn_index)
             await session_broadcaster.emit(
                 self.sid,
                 "session.status",
@@ -132,6 +135,7 @@ class SessionEngine:
             self.status = "paused"
             self._pause_event.clear()
             await repo.update_session(self.sid, status="paused")
+            self._update_session_meta(status="paused")
             await session_broadcaster.emit(
                 self.sid,
                 "session.status",
@@ -145,6 +149,7 @@ class SessionEngine:
             self.status = "running"
             self._pause_event.set()
             await repo.update_session(self.sid, status="running")
+            self._update_session_meta(status="running")
             await session_broadcaster.emit(
                 self.sid,
                 "session.status",
@@ -163,6 +168,7 @@ class SessionEngine:
                 status="done",
                 ended_at=dt.datetime.utcnow().isoformat(),
             )
+            self._update_session_meta(status="done")
             await session_broadcaster.emit(
                 self.sid,
                 "session.status",
@@ -225,13 +231,22 @@ class SessionEngine:
                 {"scope": "session", "message": "engine crashed", "details": str(exc)},
             )
         finally:
+            self.phase_deadline = None
+            ended_iso = dt.datetime.utcnow().isoformat()
             await repo.update_session(
                 self.sid,
                 status="done",
                 turn_index=self.turn_index,
                 phase=self.phase,
                 deadline=None,
-                ended_at=dt.datetime.utcnow().isoformat(),
+                ended_at=ended_iso,
+            )
+            self._update_session_meta(
+                status="done",
+                turn_index=self.turn_index,
+                phase=self.phase,
+                deadline=None,
+                ended_at=ended_iso,
             )
             await session_broadcaster.emit(
                 self.sid,
@@ -249,6 +264,7 @@ class SessionEngine:
             phase=self.phase,
             deadline=self.phase_deadline.isoformat(),
         )
+        self._update_session_meta(phase=self.phase, deadline=self.phase_deadline.isoformat())
         await session_broadcaster.emit(
             self.sid,
             "phase.changed",
@@ -263,6 +279,7 @@ class SessionEngine:
             "session.status",
             self._status_payload(),
         )
+        self._update_session_meta(status=self.status)
 
         cycles = 0
         while cycles < self.max_turns_per_phase and not self._stop_requested:
@@ -311,6 +328,7 @@ class SessionEngine:
         if self.status == "paused":
             return
 
+        turn_started = dt.datetime.utcnow()
         agent_id = agent["id"]
         role = agent["role"]
         trait = agent.get("trait") or ""
@@ -347,6 +365,16 @@ class SessionEngine:
             "session.status",
             self._status_payload(),
         )
+        self._update_session_meta(turn_index=self.turn_index)
+
+        self._log_agent_turn_start(
+            agent=agent,
+            model=model,
+            phase=phase,
+            notepad_mode=notepad_mode,
+            summary_mode=summary_mode,
+            prompt=user_prompt,
+        )
 
         text_accum = ""
         try:
@@ -367,7 +395,15 @@ class SessionEngine:
                     },
                 )
         except Exception as exc:
-            logger.exception("LLM streaming failed for session %s agent %s: %s", self.sid, agent_id, exc)
+            self._log_agent_turn_error(
+                agent=agent,
+                model=model,
+                phase=phase,
+                notepad_mode=notepad_mode,
+                summary_mode=summary_mode,
+                prompt=user_prompt,
+                error=exc,
+            )
             await session_broadcaster.emit(
                 self.sid,
                 "error",
@@ -411,6 +447,16 @@ class SessionEngine:
                 "confidence": confidence,
                 "created_at": dt.datetime.utcnow().isoformat(),
             },
+        )
+        duration = (dt.datetime.utcnow() - turn_started).total_seconds()
+        self._log_agent_turn_complete(
+            agent=agent,
+            model=model,
+            message_id=message_id,
+            text=text,
+            sentiment=sentiment,
+            confidence=confidence,
+            duration_sec=duration,
         )
 
     # --- Helpers ---------------------------------------------------------
@@ -481,6 +527,9 @@ class SessionEngine:
             f"Session phase: {phase.name.upper()} — {phase.objective}",
             f"You are {agent['name']} ({agent['role']}).",
         ]
+        problem_statement = (self._session_meta or {}).get("problem_statement")
+        if problem_statement:
+            lines.append(f"Problem statement: {problem_statement}")
         trait = agent.get("trait")
         if trait:
             lines.append(f"Trait guidance: {trait}.")
@@ -525,3 +574,117 @@ class SessionEngine:
         if user_conf is not None:
             return round(0.6 * user_conf + 0.4 * auto_conf, 3)
         return round(auto_conf, 3)
+
+    def _update_session_meta(self, **fields: Any) -> None:
+        if not self._session_meta:
+            self._session_meta = {}
+        self._session_meta.update(fields)
+
+    @staticmethod
+    def _truncate(value: Optional[str], limit: int) -> str:
+        if not value:
+            return ""
+        value = value.strip()
+        if len(value) <= limit:
+            return value
+        return value[: max(0, limit - 1)] + "…"
+
+    def _log_agent_turn_start(
+        self,
+        *,
+        agent: Dict[str, Any],
+        model: str,
+        phase: DoubleDiamondPhase,
+        notepad_mode: bool,
+        summary_mode: bool,
+        prompt: str,
+    ) -> None:
+        session_meta = self._session_meta or {}
+        payload = {
+            "event": "agent_turn_start",
+            "session_id": self.sid,
+            "session_title": session_meta.get("title"),
+            "strategy": session_meta.get("strategy"),
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "phase_objective": phase.objective,
+            "problem_statement": self._truncate(session_meta.get("problem_statement"), 320),
+            "agent": {
+                "id": agent.get("id"),
+                "name": agent.get("name"),
+                "role": agent.get("role"),
+                "trait": agent.get("trait"),
+                "model": model,
+            },
+            "modes": {
+                "notepad_mode": notepad_mode,
+                "summary_mode": summary_mode,
+            },
+            "prompt_preview": self._truncate(prompt, 400),
+        }
+        logger.info("agent_turn_start %s", json.dumps(payload))
+
+    def _log_agent_turn_complete(
+        self,
+        *,
+        agent: Dict[str, Any],
+        model: str,
+        message_id: int,
+        text: str,
+        sentiment: Optional[float],
+        confidence: Optional[float],
+        duration_sec: float,
+    ) -> None:
+        payload = {
+            "event": "agent_turn_complete",
+            "session_id": self.sid,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "agent": {
+                "id": agent.get("id"),
+                "name": agent.get("name"),
+                "role": agent.get("role"),
+                "model": model,
+            },
+            "message_id": message_id,
+            "sentiment": sentiment,
+            "confidence": confidence,
+            "duration_sec": round(duration_sec, 3),
+            "response_preview": self._truncate(text, 400),
+        }
+        logger.info("agent_turn_complete %s", json.dumps(payload))
+
+    def _log_agent_turn_error(
+        self,
+        *,
+        agent: Dict[str, Any],
+        model: str,
+        phase: DoubleDiamondPhase,
+        notepad_mode: bool,
+        summary_mode: bool,
+        prompt: str,
+        error: Exception,
+    ) -> None:
+        session_meta = self._session_meta or {}
+        payload = {
+            "event": "agent_turn_error",
+            "session_id": self.sid,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "phase_objective": phase.objective,
+            "agent": {
+                "id": agent.get("id"),
+                "name": agent.get("name"),
+                "role": agent.get("role"),
+                "trait": agent.get("trait"),
+                "model": model,
+            },
+            "modes": {
+                "notepad_mode": notepad_mode,
+                "summary_mode": summary_mode,
+            },
+            "problem_statement": self._truncate(session_meta.get("problem_statement"), 320),
+            "prompt_preview": self._truncate(prompt, 400),
+            "error": str(error),
+        }
+        logger.exception("agent_turn_error %s", json.dumps(payload))

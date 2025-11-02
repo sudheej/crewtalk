@@ -41,3 +41,10 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8080
     depends_on: [api]
     ports: ["3000:3000"]
+    volumes:
+      - ../apps/web:/app
+      - web-node-modules:/app/node_modules
+    command: sh -c "npm install && npm run dev"
+
+volumes:
+  web-node-modules:

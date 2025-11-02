@@ -30,6 +30,14 @@
 - `GET /sessions/{sid}` hydrates the UI (agents, last 50 messages, notepad).
 - `GET /sessions/{sid}/export` returns full session/agent/message/notepad history.
 
+### WebSocket events
+- `session.status` → high-level status (`idle|running|paused|done`), current phase, turn index, deadline.
+- `phase.changed` → phase transition payload (`from`, `to`, `deadline` ISO string).
+- `token.delta` → incremental text chunk (`agent_id`, `turn_index`, `text_delta`).
+- `message.created` → committed message with sentiment/confidence metadata.
+- `notepad.updated` → latest notepad body and author hint.
+- `error` → non-fatal issues (scope = `session|turn|agent`).
+
 ## Known Issues & Fixes
 1. **LiteLLM “LLM object has no attribute split”**  
    - Cause: wrapping CrewAI’s `LLM` manually or returning a dict from `get_llm()`.  
@@ -55,5 +63,6 @@
 5. Optional: pull alternate models with `docker compose exec -T ollama ollama pull <model>`
 
 ## References
-- Root `README.md` for prerequisites, initial workflow, and configuration knobs.
-- `services/api/app/main.py` for endpoint contracts and probe logic.
+- Root `README.md` for prerequisites, workflow, and API quick reference.
+- `services/api/app/main.py` for endpoint contracts and WebSocket producer.
+- `services/api/app/engine/session_engine.py` for orchestration details.

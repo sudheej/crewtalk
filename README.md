@@ -36,6 +36,15 @@ curl -s http://localhost:8080/health/ollama | jq
 
 The engine stores every committed message with sentiment/confidence scores, while short-term context (last 8 turns per agent) and the notepad live in Redis. Export a full transcript via `GET /sessions/{id}/export`.
 
+### API quick reference
+- `POST /sessions` → create a session (`status=idle`, `phase=discover`).
+- `POST /sessions/{sid}/agents` → add an agent after running the probe.
+- `POST /sessions/{sid}/start|pause|resume|advance|stop` → control the orchestrator.
+- `POST /sessions/{sid}/notepad` → persist the shared notepad.
+- `GET /sessions/{sid}` → hydrate the UI (agents, recent turns, notepad).
+- `GET /sessions/{sid}/export` → download full session history.
+- `GET /sessions/{sid}/stream` → WebSocket delivering `session.status`, `phase.changed`, `token.delta`, `message.created`, `notepad.updated`, and `error` events.
+
 ## Troubleshooting
 - If `/health/ollama` fails, ensure the Ollama container is running (`docker compose ps ollama`) and that the model is pulled.
 - The helper script `scripts/test_ollama_connectivity.sh` checks both host and in-container access paths.

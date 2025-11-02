@@ -9,8 +9,8 @@
 ## LLM Integration
 - `services/api/app/llm.py`: `get_llm()` returns the provider string `ollama/<model>` and force-syncs Ollama-related env vars (`LITELLM_OLLAMA_API_BASE`, `OLLAMA_BASE_URL`, `OLLAMA_HOST`, `OLLAMA_URL`, `OLLAMA_API_BASE`) to `http://ollama:11434`. CrewAI then instantiates its own wrapper without double-wrapping.
 - **Critical**: Inside the API container the Ollama endpoint is *not* `localhost`. If LiteLLM logs still show `localhost:11434`, re-check these env vars or restart the container.
-- Pull the target model *inside* the Ollama container after boot:  
-  `docker compose -f infra/docker-compose.yml exec -T ollama ollama pull gemma3:4b-it-qat`
+- The Ollama service pulls `${LLM_MODEL_ID}` automatically during startup.  
+  Run `docker compose -f infra/docker-compose.yml exec -T ollama ollama pull <other-model>` only when switching to a different tag.
 
 ## Agent Templates
 - `services/api/app/agents.py` defines `make_moderator`, `make_participant`, `make_notetaker`, ensuring CrewAI-required fields:
@@ -41,8 +41,8 @@
 
 ## Bring-Up Checklist
 1. `cd infra && docker compose up --build`
-2. `docker compose exec -T ollama ollama pull <model>` (default `gemma3:4b-it-qat`)
-3. Confirm `curl http://localhost:8080/health/ollama` returns `{"ok": true, …}`
+2. Confirm `curl http://localhost:8080/health/ollama` returns `{"ok": true, …}`
+3. Optional: pull alternate models with `docker compose exec -T ollama ollama pull <model>`
 4. Optional: `./scripts/debug_agent_probe.sh` to validate the probe task.
 
 ## References

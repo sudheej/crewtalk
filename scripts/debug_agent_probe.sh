@@ -4,7 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
+COMPOSE_FILE_RELATIVE="infra/docker-compose.yml"
+COMPOSE_FILE="$REPO_ROOT/$COMPOSE_FILE_RELATIVE"
 
 echo "==> Checking API logs (last 120 lines)"
 docker compose -f "$COMPOSE_FILE" logs api -n 120 || true
@@ -19,7 +20,9 @@ docker compose -f "$COMPOSE_FILE" exec -T api env | grep -E '^OLLAMA_URL' || tru
 
 echo
 echo "==> Running in-container probe reproduction"
-docker compose -f "$COMPOSE_FILE" exec -T api python - <<'PY'
+docker compose -f "$COMPOSE_FILE" exec -T \
+  -e DEBUG_AGENT_COMPOSE_FILE="$COMPOSE_FILE_RELATIVE" \
+  api python - <<'PY'
 import json
 import traceback
 
@@ -51,6 +54,36 @@ try:
         tags_resp = client.get(OLLAMA_URL.rstrip('/') + "/api/tags")
     print("GET /api/tags ->", tags_resp.status_code)
     print("Tags body (truncated):", tags_resp.text[:400])
+    tags_json = None
+    if tags_resp.headers.get("content-type", "").startswith("application/json"):
+        try:
+            tags_json = tags_resp.json()
+        except ValueError:
+            tags_json = None
+    if tags_json is not None:
+        models = []
+        for entry in tags_json.get("models", []):
+            if isinstance(entry, dict):
+                for key in ("model", "name", "tag"):
+                    value = entry.get(key)
+                    if isinstance(value, str):
+                        models.append(value)
+        models = sorted(set(models))
+        print("Discovered Ollama models:", models if models else "<none>")
+        compose_file_hint = os.environ.get("DEBUG_AGENT_COMPOSE_FILE", "infra/docker-compose.yml")
+        if not models:
+            print(
+                "No models are currently installed in the Ollama container. "
+                f"Pull one (default '{DEFAULT_MODEL}') with:\n  docker compose -f {compose_file_hint} exec -T ollama "
+                f"ollama pull {DEFAULT_MODEL}"
+            )
+        elif DEFAULT_MODEL not in models:
+            print(
+                f"Default model '{DEFAULT_MODEL}' is missing. "
+                f"Install it via:\n  docker compose -f {compose_file_hint} exec -T ollama "
+                f"ollama pull {DEFAULT_MODEL}\n"
+                "Alternatively, set LLM_MODEL_ID to one of the installed models listed above."
+            )
 except Exception as tags_exc:
     print("Failed to reach Ollama /api/tags:", tags_exc)
 

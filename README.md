@@ -10,9 +10,10 @@
 cd infra
 docker compose up --build
 
-# 2) Pull the default model inside the Ollama container
+# 2) (Optional) Pull a different model inside the Ollama container
+#     The Ollama service now pulls `${LLM_MODEL_ID}` automatically on startup.
 docker compose exec ollama ollama pull gemma3:4b-it-qat
-#   (use `gemma3:4b` if you prefer the full-precision build)
+#   (use `LLM_MODEL_ID=gemma3:4b` for the full-precision build, or pull another tag)
 
 # 3) Verify the API sees Ollama
 curl -s http://localhost:8080/health/ollama | jq

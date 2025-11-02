@@ -17,8 +17,14 @@ services:
     restart: unless-stopped
     volumes:
       - ../volumes/ollama:/root/.ollama
+      - ./ollama-entrypoint.sh:/entrypoint.sh:ro
     ports:
       - "11434:11434"
+    environment:
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-gemma3:4b-it-qat}
+    entrypoint:
+      - /bin/sh
+      - /entrypoint.sh
 
   api:
     build: ../services/api
